@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0d0e12">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="FitTrack">
+  <title>FitTrack — Sport, Sommeil & Nutrition</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- ===== DASHBOARD ===== -->
+    <section class="view" id="view-dashboard">
+      <div class="view-header">
+        <div>
+          <h1>Dashboard</h1>
+          <div class="subtitle" id="dash-date"></div>
+        </div>
+      </div>
+      <div class="stat-row" id="dash-stats"></div>
+      <div class="card">
+        <h2>Régularité</h2>
+        <div class="pixel-months" id="pixel-months"></div>
+        <div class="pixel-calendar" id="pixel-calendar"></div>
+        <div class="pixel-legend">
+          <span class="pixel" style="width:11px;height:11px"></span> Repos
+          <span class="pixel done" style="width:11px;height:11px"></span> Séance réalisée
+        </div>
+      </div>
+      <div class="card">
+        <h2>Records personnels</h2>
+        <div id="dash-records"></div>
+      </div>
+      <div class="card">
+        <h2>Aujourd'hui</h2>
+        <div id="dash-today"></div>
+      </div>
+    </section>
+
+    <!-- ===== ENTRAÎNEMENT ===== -->
+    <section class="view" id="view-workout">
+      <!-- Sous-vue : liste des séances -->
+      <div id="workout-home">
+        <div class="view-header">
+          <div>
+            <h1>Entraînement</h1>
+            <div class="subtitle">Vos séances et exercices</div>
+          </div>
+          <button class="btn primary small" id="btn-new-template">+ Séance</button>
+        </div>
+        <div class="card">
+          <h2>Mes séances</h2>
+          <div id="template-list"></div>
+        </div>
+        <div class="card">
+          <h2>Historique</h2>
+          <div id="session-history"></div>
+        </div>
+      </div>
+
+      <!-- Sous-vue : séance active -->
+      <div id="workout-active" class="hidden">
+        <div class="view-header">
+          <div>
+            <h1 id="active-session-name">Séance</h1>
+            <div class="subtitle" id="active-session-sub"></div>
+          </div>
+          <button class="btn ghost small danger" id="btn-cancel-session">Annuler</button>
+        </div>
+        <div id="active-session-exercises"></div>
+        <button class="btn full" id="btn-session-add-exercise" style="margin-bottom:10px">+ Ajouter un exercice</button>
+        <button class="btn primary full" id="btn-finish-session">Terminer la séance ✓</button>
+      </div>
+    </section>
+
+    <!-- ===== SOMMEIL ===== -->
+    <section class="view" id="view-sleep">
+      <div class="view-header">
+        <div>
+          <h1>Sommeil</h1>
+          <div class="subtitle">Objectif et suivi de vos nuits</div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Cette nuit</h2>
+        <div class="ring-wrap">
+          <div class="ring" id="sleep-ring"></div>
+          <div style="flex:1">
+            <div id="sleep-today-summary" class="section-note" style="margin-bottom:10px"></div>
+            <button class="btn primary small" id="btn-log-sleep">Enregistrer ma nuit</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>7 derniers jours</h2>
+        <div class="bars-chart" id="sleep-chart"></div>
+        <div class="goal-line-note" id="sleep-goal-note"></div>
+      </div>
+      <div class="card">
+        <h2>Objectif de sommeil</h2>
+        <label class="field">
+          <span class="field-name">Heures de sommeil visées par nuit</span>
+          <div class="field-row">
+            <input type="number" id="sleep-goal-input" min="4" max="12" step="0.5">
+            <button class="btn primary" id="btn-save-sleep-goal">Enregistrer</button>
+          </div>
+        </label>
+        <div class="section-note" id="sleep-stats-note"></div>
+      </div>
+    </section>
+
+    <!-- ===== NUTRITION ===== -->
+    <section class="view" id="view-nutrition">
+      <div class="view-header">
+        <div>
+          <h1>Nutrition</h1>
+          <div class="subtitle">Repas, macros et hydratation</div>
+        </div>
+      </div>
+      <div class="date-nav">
+        <button class="btn-icon" id="nutri-prev">‹</button>
+        <div class="date-label" id="nutri-date-label"></div>
+        <button class="btn-icon" id="nutri-next">›</button>
+      </div>
+      <div class="card">
+        <h2>Bilan du jour</h2>
+        <div id="nutri-macros"></div>
+      </div>
+      <div class="card">
+        <h2>Hydratation <span class="h2-action badge blue" id="water-badge"></span></h2>
+        <div class="progress-track"><div class="progress-fill blue" id="water-fill" style="width:0%"></div></div>
+        <div class="water-glasses" id="water-glasses"></div>
+        <div class="water-quick">
+          <button class="btn small" data-water="250">+ 250 ml</button>
+          <button class="btn small" data-water="500">+ 500 ml</button>
+          <button class="btn small" data-water="750">+ 750 ml</button>
+          <button class="btn ghost small danger" data-water="reset">Réinit.</button>
+        </div>
+      </div>
+      <div class="card" id="meals-card">
+        <h2>Repas</h2>
+        <div id="meals-container"></div>
+      </div>
+    </section>
+
+    <!-- ===== RÉGLAGES ===== -->
+    <section class="view" id="view-settings">
+      <div class="view-header">
+        <div>
+          <h1>Réglages</h1>
+          <div class="subtitle">Objectifs, données & Apple Santé</div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Objectifs nutrition</h2>
+        <div class="field-row">
+          <label class="field"><span class="field-name">Calories (kcal)</span><input type="number" id="set-kcal" min="1000" step="50"></label>
+          <label class="field"><span class="field-name">Eau (ml)</span><input type="number" id="set-water" min="500" step="250"></label>
+        </div>
+        <div class="field-row">
+          <label class="field"><span class="field-name">Protéines (g)</span><input type="number" id="set-prot" min="0"></label>
+          <label class="field"><span class="field-name">Glucides (g)</span><input type="number" id="set-gluc" min="0"></label>
+          <label class="field"><span class="field-name">Lipides (g)</span><input type="number" id="set-lip" min="0"></label>
+        </div>
+        <button class="btn primary full" id="btn-save-settings">Enregistrer les objectifs</button>
+      </div>
+      <div class="card">
+        <h2> Apple Santé</h2>
+        <p class="section-note">
+          Une application web ne peut pas se connecter directement à HealthKit (réservé aux apps iOS natives).
+          Vous pouvez en revanche <strong>importer votre export Apple Santé</strong> :
+          sur iPhone, ouvrez Santé → votre photo de profil → « Exporter toutes les données », décompressez le zip
+          et importez le fichier <code>export.xml</code> ci-dessous. Sommeil, eau et entraînements seront récupérés.
+        </p>
+        <div class="divider"></div>
+        <input type="file" id="health-import-file" accept=".xml" class="hidden">
+        <button class="btn full" id="btn-health-import">📥 Importer export.xml</button>
+        <div class="section-note" id="health-import-status" style="margin-top:10px"></div>
+      </div>
+      <div class="card">
+        <h2>Sauvegarde</h2>
+        <div class="field-row">
+          <button class="btn" id="btn-export-json">⬇ Exporter (JSON)</button>
+          <button class="btn" id="btn-import-json">⬆ Importer (JSON)</button>
+        </div>
+        <input type="file" id="json-import-file" accept=".json" class="hidden">
+        <div class="divider"></div>
+        <button class="btn full danger" id="btn-reset-all">Effacer toutes les données</button>
+      </div>
+      <p class="section-note" style="text-align:center" id="app-version"></p>
+    </section>
+  </div>
+
+  <!-- ===== TAB BAR ===== -->
+  <nav id="tabbar">
+    <button class="tab-btn active" data-view="dashboard"><span class="tab-icon">📊</span>Dashboard</button>
+    <button class="tab-btn" data-view="workout"><span class="tab-icon">🏋️</span>Sport</button>
+    <button class="tab-btn" data-view="sleep"><span class="tab-icon">😴</span>Sommeil</button>
+    <button class="tab-btn" data-view="nutrition"><span class="tab-icon">🍽️</span>Nutrition</button>
+    <button class="tab-btn" data-view="settings"><span class="tab-icon">⚙️</span>Réglages</button>
+  </nav>
+
+  <!-- ===== MODAL ===== -->
+  <div class="modal-backdrop" id="modal-backdrop">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="modal-title"></h3>
+        <button class="close-x" id="modal-close">✕</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+  <script>
+    if ("serviceWorker" in navigator && location.protocol === "https:") {
+      navigator.serviceWorker.register("sw.js");
+    }
+  </script>
+</body>
+</html>
