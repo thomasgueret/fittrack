@@ -1,9 +1,10 @@
 import { EXERCISE_LIBRARY, EXERCISE_GROUPS, FOOD_LIBRARY, FOOD_CATEGORIES, MEALS } from "./data.js";
+import { BODY_SVG } from "./body.js";
 
 /* =========================================================
    État & persistance
    ========================================================= */
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.2.0";
 const STORAGE_KEY = "fittrack-state-v1";
 
 const DEFAULT_STATE = {
@@ -14,6 +15,7 @@ const DEFAULT_STATE = {
     protGoal: 150,
     glucGoal: 280,
     lipGoal: 80,
+    bodyweightKg: 75,
   },
   customExercises: [],   // {id, name, group, unit, custom:true}
   customFoods: [],       // {id, name, cat, kcal, prot, gluc, lip, custom:true}
@@ -96,10 +98,11 @@ function getNutriDay(key) {
 }
 
 /* Meilleure performance historique pour un exercice.
-   Retourne {w, r, e1rm} pour les exercices en kg, {min} pour les exercices en minutes. */
+   kg  → {w, r, e1rm} · pdc → {lest, r, e1rm} (avec poids de corps) · min → {min} */
 function bestForExercise(exId) {
   const ex = getExercise(exId);
   if (!ex) return null;
+  const bw = state.settings.bodyweightKg;
   let best = null;
   for (const session of state.sessions) {
     for (const entry of session.entries) {
@@ -108,6 +111,12 @@ function bestForExercise(exId) {
         if (ex.unit === "min") {
           const min = Number(set.r) || 0;
           if (min > 0 && (!best || min > best.min)) best = { min, date: session.date };
+        } else if (ex.unit === "pdc") {
+          const lest = Number(set.w) || 0, r = Number(set.r) || 0;
+          if (r > 0) {
+            const score = e1rm(bw + lest, r);
+            if (!best || score > best.e1rm) best = { lest, r, e1rm: score, date: session.date };
+          }
         } else {
           const w = Number(set.w) || 0, r = Number(set.r) || 0;
           if (w > 0 && r > 0) {
@@ -119,6 +128,72 @@ function bestForExercise(exId) {
     }
   }
   return best;
+}
+
+/* =========================================================
+   Gamification — rangs et stats par groupe musculaire
+   ========================================================= */
+const RANKS = [
+  { name: "Bronze", color: "#cd8a4b", min: 0 },
+  { name: "Argent", color: "#b8c0cc", min: 200 },
+  { name: "Or", color: "#ffd166", min: 500 },
+  { name: "Platine", color: "#6fe3d4", min: 1200 },
+  { name: "Diamant", color: "#4da3ff", min: 2500 },
+  { name: "Maître", color: "#a78bfa", min: 5000 },
+  { name: "Légende", color: "#ff5c39", min: 10000 },
+];
+
+// XP d'un groupe : 10 par série + 25 par séance incluant le groupe.
+// scale > 1 pour le rang global (seuils multipliés).
+function rankFor(xp, scale = 1) {
+  let idx = 0;
+  for (let i = 0; i < RANKS.length; i++) if (xp >= RANKS[i].min * scale) idx = i;
+  const rank = RANKS[idx], next = RANKS[idx + 1];
+  const progress = next ? (xp - rank.min * scale) / (next.min * scale - rank.min * scale) : 1;
+  return { rank, next, progress: Math.min(1, progress), xp };
+}
+
+function computeGroupStats() {
+  const map = {};
+  EXERCISE_GROUPS.forEach((g) => { map[g] = { sets: 0, sessions: 0, last: null, sets30: 0 }; });
+  const cutoff = addDays(todayKey(), -30);
+  for (const s of state.sessions) {
+    const groupsInSession = new Set();
+    for (const e of s.entries) {
+      const ex = getExercise(e.exId);
+      if (!ex || !map[ex.group]) continue;
+      map[ex.group].sets += e.sets.length;
+      if (s.date >= cutoff) map[ex.group].sets30 += e.sets.length;
+      groupsInSession.add(ex.group);
+    }
+    groupsInSession.forEach((g) => {
+      map[g].sessions++;
+      if (!map[g].last || s.date > map[g].last) map[g].last = s.date;
+    });
+  }
+  Object.values(map).forEach((st) => { st.xp = st.sets * 10 + st.sessions * 25; });
+  return map;
+}
+
+// Niveau d'intensité (couleur du muscle) selon les séries des 30 derniers jours
+function levelFor(sets30) {
+  if (!sets30) return 0;
+  if (sets30 < 8) return 1;
+  if (sets30 < 20) return 2;
+  if (sets30 < 40) return 3;
+  return 4;
+}
+
+function rankBadge(rank, label) {
+  return `<span class="rank-badge" style="background:${rank.color}22;color:${rank.color}">
+    <span style="width:8px;height:8px;border-radius:50%;background:${rank.color}"></span>${label || rank.name}</span>`;
+}
+
+// Libellé d'un record selon le type de compteur
+function recordLabel(ex, best) {
+  if (ex.unit === "min") return `<span class="badge purple">${best.min} min</span>`;
+  if (ex.unit === "pdc") return `${best.r} reps${best.lest ? ` +${best.lest} kg` : ""} <span class="badge blue">PDC</span>`;
+  return `${best.w} kg × ${best.r} <span class="badge accent">1RM ≈ ${Math.round(best.e1rm)} kg</span>`;
 }
 
 /* =========================================================
@@ -223,9 +298,7 @@ function renderDashboard() {
             <div class="li-title">${escapeHtml(r.ex.name)}</div>
             <div class="li-sub">${fmtDateShort(r.best.date)}</div>
           </div>
-          <div class="li-value">${r.ex.unit === "min"
-            ? `<span class="badge purple">${r.best.min} min</span>`
-            : `${r.best.w} kg × ${r.best.r} <span class="badge accent">1RM ≈ ${Math.round(r.best.e1rm)} kg</span>`}</div>
+          <div class="li-value">${recordLabel(r.ex, r.best)}</div>
         </div>`).join("")
     : `<div class="empty-state"><div class="big">🏆</div>Terminez votre première séance pour voir vos records ici.</div>`;
 
@@ -259,6 +332,9 @@ function renderWorkout() {
   }
   home.classList.remove("hidden");
   active.classList.add("hidden");
+  stopChrono(false);
+
+  renderCharacter();
 
   // Liste des séances types
   $("#template-list").innerHTML = state.templates.length
@@ -282,10 +358,15 @@ function renderWorkout() {
   $("#session-history").innerHTML = history.length
     ? history.map((s) => {
         const nbSets = s.entries.reduce((n, e) => n + e.sets.length, 0);
+        const bw = state.settings.bodyweightKg;
         const vol = s.entries.reduce((v, e) => {
           const ex = getExercise(e.exId);
           if (ex?.unit === "min") return v;
-          return v + e.sets.reduce((sv, set) => sv + (Number(set.w) || 0) * (Number(set.r) || 0), 0);
+          const base = ex?.unit === "pdc" ? bw : 0;
+          return v + e.sets.reduce((sv, set) => {
+            const r = Number(set.r) || 0;
+            return sv + (r > 0 ? (base + (Number(set.w) || 0)) * r : 0);
+          }, 0);
         }, 0);
         return `
         <div class="list-item">
@@ -304,6 +385,63 @@ function renderWorkout() {
       state.sessions = state.sessions.filter((s) => s.id !== b.dataset.delSession);
       save(); renderWorkout();
     }));
+}
+
+/* ---------- Personnage : silhouette, rangs, panneau muscle ---------- */
+let selectedGroup = null;
+
+function renderCharacter() {
+  const stats = computeGroupStats();
+
+  // Rang global (seuils ×6)
+  const totalXp = Object.values(stats).reduce((a, s) => a + s.xp, 0);
+  const global = rankFor(totalXp, 6);
+  $("#global-rank-badge").innerHTML = rankBadge(global.rank, `${global.rank.name} · ${totalXp} XP`);
+
+  // Silhouette colorée par intensité (30 derniers jours)
+  $("#body-map").innerHTML = BODY_SVG;
+  const zones = document.querySelectorAll("#body-map .muscle");
+  zones.forEach((z) => {
+    const g = z.dataset.group;
+    z.classList.add(`lvl-${levelFor(stats[g]?.sets30 || 0)}`);
+    z.addEventListener("click", () => selectMuscle(g, stats));
+    z.addEventListener("mouseenter", () => selectMuscle(g, stats));
+  });
+
+  // Liste des rangs par groupe
+  $("#rank-list").innerHTML = EXERCISE_GROUPS.map((g) => {
+    const { rank } = rankFor(stats[g].xp);
+    return `<div class="rank-item tappable" data-group-row="${g}">
+      <span class="rg-name">${g}</span>${rankBadge(rank)}</div>`;
+  }).join("");
+  document.querySelectorAll("[data-group-row]").forEach((el) =>
+    el.addEventListener("click", () => selectMuscle(el.dataset.groupRow, stats)));
+
+  selectMuscle(selectedGroup, stats, true);
+}
+
+function selectMuscle(group, stats, silent) {
+  const panel = $("#muscle-panel");
+  if (!group || !stats[group]) {
+    if (!silent) return;
+    panel.innerHTML = `<span style="color:var(--text-faint)">Touchez un muscle sur la silhouette (ou survolez-le sur PC) pour voir vos statistiques et votre rang.</span>`;
+    return;
+  }
+  selectedGroup = group;
+  document.querySelectorAll("#body-map .muscle").forEach((z) =>
+    z.classList.toggle("selected", z.dataset.group === group));
+
+  const st = stats[group];
+  const { rank, next, progress, xp } = rankFor(st.xp);
+  panel.innerHTML = `
+    <div class="mp-head"><span class="mp-name">${group}</span>${rankBadge(rank, `${rank.name}`)}</div>
+    <div class="mp-rows">
+      <span>Entraînements : <strong>${st.sessions}</strong></span>
+      <span>Séries : <strong>${st.sets}</strong></span>
+      <span>Dernier : <strong>${st.last ? fmtDateShort(st.last) : "jamais"}</strong></span>
+    </div>
+    <div class="progress-track"><div class="progress-fill" style="width:${Math.round(progress * 100)}%;background:${rank.color}"></div></div>
+    <div class="mp-next">${next ? `${xp} XP — encore ${next.min - xp} XP avant le rang ${next.name}` : `${xp} XP — rang maximum atteint 👑`}</div>`;
 }
 
 $("#btn-new-template").addEventListener("click", () => openTemplateEditor(null));
@@ -392,7 +530,7 @@ function openExercisePicker(onPick) {
       ? items.map((e) => `
           <div class="list-item tappable" data-pick="${e.id}">
             <div class="li-main"><div class="li-title">${escapeHtml(e.name)}${e.custom ? ' <span class="badge accent">perso</span>' : ""}</div>
-            <div class="li-sub">${escapeHtml(e.group)} · ${e.unit === "min" ? "durée" : "charge × reps"}</div></div>
+            <div class="li-sub">${escapeHtml(e.group)} · ${{ kg: "charge × reps", pdc: "poids de corps", min: "chronomètre" }[e.unit] || "charge × reps"}</div></div>
             <span style="color:var(--text-faint)">›</span>
           </div>`).join("")
       : `<div class="empty-state">Aucun exercice trouvé.</div>`;
@@ -411,8 +549,12 @@ function openNewExerciseForm(onPick) {
     <label class="field"><span class="field-name">Nom</span><input type="text" id="nex-name" placeholder="Ex : Curl à la poulie basse"></label>
     <label class="field"><span class="field-name">Groupe musculaire</span>
       <select id="nex-group">${EXERCISE_GROUPS.map((g) => `<option>${g}</option>`).join("")}</select></label>
-    <label class="field"><span class="field-name">Type de suivi</span>
-      <select id="nex-unit"><option value="kg">Charge (kg) × répétitions</option><option value="min">Durée (minutes)</option></select></label>
+    <label class="field"><span class="field-name">Type de compteur</span>
+      <select id="nex-unit">
+        <option value="kg">Charge (kg) × répétitions</option>
+        <option value="pdc">Poids de corps (reps + lest optionnel)</option>
+        <option value="min">Chronomètre / durée (min)</option>
+      </select></label>
     <button class="btn primary full" id="nex-save">Créer l'exercice</button>
   `);
   body.querySelector("#nex-save").addEventListener("click", () => {
@@ -442,11 +584,18 @@ function renderActiveSession() {
   $("#active-session-name").textContent = s.name;
   $("#active-session-sub").textContent = fmtDateLong(s.date);
 
+  stopChrono(false);
   $("#active-session-exercises").innerHTML = s.entries.map((entry, ei) => {
     const ex = getExercise(entry.exId);
     const best = bestForExercise(entry.exId);
-    const isMin = ex?.unit === "min";
-    const bestTxt = best ? (isMin ? `Record : ${best.min} min` : `Record : ${best.w} kg × ${best.r} (1RM ≈ ${Math.round(best.e1rm)} kg)`) : "Premier passage 💪";
+    const unit = ex?.unit || "kg";
+    let bestTxt = "Premier passage 💪";
+    if (best) {
+      if (unit === "min") bestTxt = `Record : ${best.min} min`;
+      else if (unit === "pdc") bestTxt = `Record : ${best.r} reps${best.lest ? ` (+${best.lest} kg)` : ""}`;
+      else bestTxt = `Record : ${best.w} kg × ${best.r} (1RM ≈ ${Math.round(best.e1rm)} kg)`;
+    }
+    const headers = { kg: ["Poids (kg)", "Reps"], pdc: ["Lest (kg)", "Reps"], min: ["Durée (min)", "Chrono"] }[unit];
     return `
     <div class="card session-exercise">
       <div class="ex-head">
@@ -456,14 +605,20 @@ function renderActiveSession() {
         </div>
         <button class="btn ghost small danger" data-rm-ex="${ei}">✕</button>
       </div>
-      <div class="set-cols-header"><span>#</span><span>${isMin ? "Durée (min)" : "Poids (kg)"}</span><span>${isMin ? "" : "Reps"}</span><span></span></div>
-      ${entry.sets.map((set, si) => `
+      <div class="set-cols-header"><span>#</span><span>${headers[0]}</span><span>${headers[1]}</span><span></span></div>
+      ${entry.sets.map((set, si) => {
+        const cells = unit === "min"
+          ? `<input type="number" inputmode="decimal" step="0.1" placeholder="min" value="${set.r}" data-set="${ei}:${si}:r">
+             <button class="chrono-btn" data-chrono="${ei}:${si}">⏱</button>`
+          : `<input type="number" inputmode="decimal" step="0.5" placeholder="${unit === "pdc" ? "lest" : "kg"}" value="${set.w}" data-set="${ei}:${si}:w">
+             <input type="number" inputmode="numeric" placeholder="reps" value="${set.r}" data-set="${ei}:${si}:r">`;
+        return `
         <div class="set-row">
           <span class="set-num">${si + 1}</span>
-          <input type="number" inputmode="decimal" step="0.5" placeholder="${isMin ? "min" : "kg"}" value="${isMin ? set.r : set.w}" data-set="${ei}:${si}:${isMin ? "r" : "w"}">
-          ${isMin ? "<span></span>" : `<input type="number" inputmode="numeric" placeholder="reps" value="${set.r}" data-set="${ei}:${si}:r">`}
+          ${cells}
           <button class="set-del" data-rm-set="${ei}:${si}">✕</button>
-        </div>`).join("")}
+        </div>`;
+      }).join("")}
       <button class="btn small full" data-add-set="${ei}">+ Série</button>
     </div>`;
   }).join("") || `<div class="empty-state"><div class="big">🏋️</div>Ajoutez un premier exercice pour démarrer.</div>`;
@@ -486,6 +641,39 @@ function renderActiveSession() {
     }));
   root.querySelectorAll("[data-rm-ex]").forEach((b) =>
     b.addEventListener("click", () => { s.entries.splice(Number(b.dataset.rmEx), 1); save(); renderActiveSession(); }));
+  root.querySelectorAll("[data-chrono]").forEach((btn) =>
+    btn.addEventListener("click", () => toggleChrono(btn)));
+}
+
+/* ---------- Chronomètre de série ---------- */
+let chrono = null;
+
+function toggleChrono(btn) {
+  const key = btn.dataset.chrono;
+  if (chrono && chrono.key === key) { stopChrono(true); return; }
+  stopChrono(true); // un seul chrono à la fois : l'ancien enregistre sa durée
+  chrono = {
+    key, btn, start: Date.now(),
+    timer: setInterval(() => {
+      const sec = Math.floor((Date.now() - chrono.start) / 1000);
+      btn.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+    }, 500),
+  };
+  btn.classList.add("running");
+  btn.textContent = "0:00";
+}
+
+function stopChrono(writeValue) {
+  if (!chrono) return;
+  clearInterval(chrono.timer);
+  if (writeValue) {
+    const mins = Math.round(((Date.now() - chrono.start) / 60000) * 100) / 100;
+    const input = document.querySelector(`[data-set="${chrono.key}:r"]`);
+    if (input) { input.value = mins; input.dispatchEvent(new Event("input")); }
+  }
+  chrono.btn.classList.remove("running");
+  chrono.btn.textContent = "⏱";
+  chrono = null;
 }
 
 $("#btn-session-add-exercise").addEventListener("click", () =>
@@ -524,7 +712,9 @@ $("#btn-finish-session").addEventListener("click", () => {
     if (ex.unit === "min") {
       if (!prev || now.min > prev.min) prs.push(`${ex.name} : ${now.min} min`);
     } else if (!prev || now.e1rm > prev.e1rm) {
-      prs.push(`${ex.name} : ${now.w} kg × ${now.r}`);
+      prs.push(ex.unit === "pdc"
+        ? `${ex.name} : ${now.r} reps${now.lest ? ` +${now.lest} kg` : ""}`
+        : `${ex.name} : ${now.w} kg × ${now.r}`);
     }
   });
   if (prs.length) alert("🏆 Nouveau record personnel !\n\n" + prs.join("\n"));
@@ -814,6 +1004,7 @@ function openNewFoodForm(mealId) {
    ========================================================= */
 function renderSettings() {
   const g = state.settings;
+  $("#set-bodyweight").value = g.bodyweightKg;
   $("#set-kcal").value = g.kcalGoal;
   $("#set-water").value = g.waterGoalMl;
   $("#set-prot").value = g.protGoal;
@@ -824,6 +1015,7 @@ function renderSettings() {
 
 $("#btn-save-settings").addEventListener("click", () => {
   const g = state.settings;
+  g.bodyweightKg = Number($("#set-bodyweight").value) || g.bodyweightKg;
   g.kcalGoal = Number($("#set-kcal").value) || g.kcalGoal;
   g.waterGoalMl = Number($("#set-water").value) || g.waterGoalMl;
   g.protGoal = Number($("#set-prot").value) || g.protGoal;

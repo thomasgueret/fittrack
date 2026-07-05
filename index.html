@@ -54,6 +54,12 @@
           <button class="btn primary small" id="btn-new-template">+ Séance</button>
         </div>
         <div class="card">
+          <h2>Mon personnage <span class="h2-action" id="global-rank-badge"></span></h2>
+          <div id="body-map"></div>
+          <div id="muscle-panel" class="muscle-panel"></div>
+          <div id="rank-list" class="rank-grid"></div>
+        </div>
+        <div class="card">
           <h2>Mes séances</h2>
           <div id="template-list"></div>
         </div>
@@ -155,6 +161,12 @@
           <h1>Réglages</h1>
           <div class="subtitle">Objectifs, données & Apple Santé</div>
         </div>
+      </div>
+      <div class="card">
+        <h2>Profil</h2>
+        <label class="field"><span class="field-name">Poids de corps (kg)</span>
+          <input type="number" id="set-bodyweight" min="30" max="250" step="0.5"></label>
+        <p class="section-note">Utilisé pour calculer le volume et les records des exercices au poids de corps (tractions, dips, pompes…).</p>
       </div>
       <div class="card">
         <h2>Objectifs nutrition</h2>

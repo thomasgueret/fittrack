@@ -1,5 +1,8 @@
 // Bibliothèque d'exercices intégrée
-// unit: "kg" (charge) ou "min" (durée) — détermine la saisie des séries
+// unit — type de compteur pour la saisie des séries :
+//   "kg"  : charge (kg) × répétitions
+//   "pdc" : poids de corps — répétitions + lest optionnel (kg)
+//   "min" : durée en minutes, avec chronomètre intégré
 export const EXERCISE_LIBRARY = [
   // Pectoraux
   { id: "dev-couche", name: "Développé couché", group: "Pectoraux", unit: "kg" },
@@ -8,11 +11,11 @@ export const EXERCISE_LIBRARY = [
   { id: "dev-incline-halteres", name: "Développé incliné haltères", group: "Pectoraux", unit: "kg" },
   { id: "ecarte-halteres", name: "Écarté haltères", group: "Pectoraux", unit: "kg" },
   { id: "ecarte-poulie", name: "Écarté à la poulie", group: "Pectoraux", unit: "kg" },
-  { id: "pompes", name: "Pompes", group: "Pectoraux", unit: "kg" },
-  { id: "dips", name: "Dips", group: "Pectoraux", unit: "kg" },
+  { id: "pompes", name: "Pompes", group: "Pectoraux", unit: "pdc" },
+  { id: "dips", name: "Dips", group: "Pectoraux", unit: "pdc" },
 
   // Dos
-  { id: "tractions", name: "Tractions", group: "Dos", unit: "kg" },
+  { id: "tractions", name: "Tractions", group: "Dos", unit: "pdc" },
   { id: "tirage-vertical", name: "Tirage vertical", group: "Dos", unit: "kg" },
   { id: "rowing-barre", name: "Rowing barre", group: "Dos", unit: "kg" },
   { id: "rowing-haltere", name: "Rowing haltère", group: "Dos", unit: "kg" },
@@ -40,7 +43,7 @@ export const EXERCISE_LIBRARY = [
   { id: "extension-poulie", name: "Extension triceps poulie", group: "Triceps", unit: "kg" },
   { id: "barre-au-front", name: "Barre au front", group: "Triceps", unit: "kg" },
   { id: "extension-nuque", name: "Extension nuque haltère", group: "Triceps", unit: "kg" },
-  { id: "dips-triceps", name: "Dips prise serrée", group: "Triceps", unit: "kg" },
+  { id: "dips-triceps", name: "Dips prise serrée", group: "Triceps", unit: "pdc" },
   { id: "kickback", name: "Kickback triceps", group: "Triceps", unit: "kg" },
 
   // Jambes
@@ -59,10 +62,10 @@ export const EXERCISE_LIBRARY = [
   { id: "abduction-machine", name: "Abduction machine", group: "Fessiers", unit: "kg" },
 
   // Abdos
-  { id: "crunch", name: "Crunch", group: "Abdos", unit: "kg" },
-  { id: "releve-jambes", name: "Relevé de jambes", group: "Abdos", unit: "kg" },
+  { id: "crunch", name: "Crunch", group: "Abdos", unit: "pdc" },
+  { id: "releve-jambes", name: "Relevé de jambes", group: "Abdos", unit: "pdc" },
   { id: "planche", name: "Planche (gainage)", group: "Abdos", unit: "min" },
-  { id: "russian-twist", name: "Russian twist", group: "Abdos", unit: "kg" },
+  { id: "russian-twist", name: "Russian twist", group: "Abdos", unit: "pdc" },
   { id: "roulette-abdos", name: "Roulette abdominale", group: "Abdos", unit: "kg" },
 
   // Cardio
