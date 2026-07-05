@@ -53,6 +53,7 @@
           </div>
           <button class="btn primary small" id="btn-new-template">+ Séance</button>
         </div>
+        <button class="btn primary full" id="btn-start-session" style="margin-bottom:14px;font-size:16px;padding:15px">▶ &nbsp;Démarrer une séance</button>
         <div class="card">
           <h2>Mon personnage <span class="h2-action" id="global-rank-badge"></span></h2>
           <div id="body-map"></div>
@@ -69,7 +70,7 @@
         </div>
       </div>
 
-      <!-- Sous-vue : séance active -->
+      <!-- Sous-vue : séance active (vue d'ensemble) -->
       <div id="workout-active" class="hidden">
         <div class="view-header">
           <div>
@@ -78,9 +79,25 @@
           </div>
           <button class="btn ghost small danger" id="btn-cancel-session">Annuler</button>
         </div>
-        <div id="active-session-exercises"></div>
+        <div class="card">
+          <h2>Exercices de la séance</h2>
+          <div id="active-session-exercises"></div>
+        </div>
         <button class="btn full" id="btn-session-add-exercise" style="margin-bottom:10px">+ Ajouter un exercice</button>
         <button class="btn primary full" id="btn-finish-session">Terminer la séance ✓</button>
+      </div>
+
+      <!-- Sous-vue : détail d'un exercice (séries + historique) -->
+      <div id="workout-exercise" class="hidden">
+        <div class="view-header" style="justify-content:flex-start;gap:12px">
+          <button class="btn-icon" id="btn-ex-back">‹</button>
+          <div>
+            <h1 id="ex-detail-name" style="font-size:23px">Exercice</h1>
+            <div class="subtitle" id="ex-detail-sub"></div>
+          </div>
+        </div>
+        <div id="ex-detail-cards"></div>
+        <button class="btn primary full" id="btn-add-serie" style="margin-top:6px">+ Ajouter une série</button>
       </div>
     </section>
 

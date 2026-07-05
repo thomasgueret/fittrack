@@ -266,6 +266,41 @@ label.field .field-name { display: block; font-size: 12.5px; font-weight: 600; c
 .rank-grid .rank-item { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12.5px; padding: 5px 0; border-bottom: 1px solid var(--border); }
 .rank-grid .rank-item .rg-name { color: var(--text-dim); font-weight: 600; }
 
+/* ---------- Détail exercice : cartes par date + séries ---------- */
+.date-card {
+  display: flex; align-items: center; gap: 22px;
+  background: var(--accent-grad); border-radius: 14px;
+  padding: 12px 18px; margin: 16px 0 4px; color: #fff;
+}
+.date-card.past { background: var(--card); border: 1px solid var(--border); color: var(--text); }
+.date-card .dc-date { font-weight: 800; font-size: 19px; line-height: 1.05; text-align: center; }
+.date-card .dc-date small { display: block; font-size: 11px; font-weight: 600; opacity: 0.8; }
+.date-card .dc-label { font-size: 12px; opacity: 0.85; }
+.date-card .dc-stat { text-align: center; }
+.date-card .dc-stat .v { font-size: 19px; font-weight: 800; }
+.date-card .dc-stat .l { font-size: 11px; opacity: 0.8; }
+
+.serie-row { display: flex; align-items: center; gap: 14px; padding: 10px 6px; }
+.serie-row .sr-num { color: var(--text-dim); width: 58px; font-size: 13px; flex-shrink: 0; }
+.serie-row .sr-val { font-size: 17px; font-weight: 700; flex: 1; }
+.serie-row .sr-val .x { color: var(--text-dim); font-weight: 600; font-size: 14px; }
+.serie-row .sr-val .hl { color: var(--accent); }
+.serie-row .sr-del { color: var(--text-faint); font-size: 16px; padding: 2px 8px; }
+
+/* ---------- Pavé numérique (saisie de série) ---------- */
+.pad-section-head { display: flex; justify-content: space-between; align-items: baseline; margin: 12px 0 8px; }
+.pad-section-head .pad-label { font-size: 14px; color: var(--text-dim); font-weight: 600; }
+.pad-value { font-size: 26px; font-weight: 800; }
+.pad-value .unit { font-size: 15px; font-weight: 600; color: var(--text-dim); }
+.pad-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.pad-key {
+  background: var(--card-hover); border: 1px solid var(--border);
+  border-radius: 12px; padding: 13px 0; font-size: 16px; font-weight: 700; text-align: center;
+}
+.pad-key:active { opacity: 0.65; }
+.pad-key.span-2 { grid-column: span 2; }
+.pad-key.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
 /* ---------- Chronomètre de série ---------- */
 .chrono-btn {
   border: 1px solid var(--border); border-radius: 8px; background: var(--card-hover);

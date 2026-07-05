@@ -4,7 +4,7 @@ import { BODY_SVG } from "./body.js";
 /* =========================================================
    État & persistance
    ========================================================= */
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.3.0";
 const STORAGE_KEY = "fittrack-state-v1";
 
 const DEFAULT_STATE = {
@@ -84,6 +84,25 @@ function getFood(id) { return allFoods().find((f) => f.id === id); }
 // Estimation 1RM (formule d'Epley)
 const e1rm = (w, r) => (r <= 1 ? w : w * (1 + r / 30));
 
+/* Charge réelle d'une série (poids de corps inclus) :
+   - exercice "pdc" : poids de corps + lest éventuel (set.w)
+   - série marquée PDC (set.pdc, via le pavé) : poids de corps seul
+   - sinon : charge externe (set.w) */
+function loadOfSet(ex, set) {
+  const bw = state.settings.bodyweightKg;
+  if (ex?.unit === "pdc") return bw + (Number(set.w) || 0);
+  if (set.pdc) return bw;
+  return Number(set.w) || 0;
+}
+
+// Libellé de la charge d'une série ("10 kg", "PDC", "PDC +10 kg")
+function chargeLabel(ex, set) {
+  const w = Number(set.w) || 0;
+  if (ex?.unit === "pdc") return w > 0 ? `PDC +${w} kg` : "PDC";
+  if (set.pdc) return "PDC";
+  return `${w} kg`;
+}
+
 function workoutDaysSet() {
   const days = new Set(state.sessions.map((s) => s.date));
   state.healthWorkoutDays.forEach((d) => days.add(d));
@@ -118,10 +137,10 @@ function bestForExercise(exId) {
             if (!best || score > best.e1rm) best = { lest, r, e1rm: score, date: session.date };
           }
         } else {
-          const w = Number(set.w) || 0, r = Number(set.r) || 0;
-          if (w > 0 && r > 0) {
-            const score = e1rm(w, r);
-            if (!best || score > best.e1rm) best = { w, r, e1rm: score, date: session.date };
+          const load = loadOfSet(ex, set), r = Number(set.r) || 0;
+          if (load > 0 && r > 0) {
+            const score = e1rm(load, r);
+            if (!best || score > best.e1rm) best = { w: Number(set.w) || 0, pdc: !!set.pdc, r, e1rm: score, date: session.date };
           }
         }
       }
@@ -193,6 +212,7 @@ function rankBadge(rank, label) {
 function recordLabel(ex, best) {
   if (ex.unit === "min") return `<span class="badge purple">${best.min} min</span>`;
   if (ex.unit === "pdc") return `${best.r} reps${best.lest ? ` +${best.lest} kg` : ""} <span class="badge blue">PDC</span>`;
+  if (best.pdc) return `PDC × ${best.r} <span class="badge accent">1RM ≈ ${Math.round(best.e1rm)} kg</span>`;
   return `${best.w} kg × ${best.r} <span class="badge accent">1RM ≈ ${Math.round(best.e1rm)} kg</span>`;
 }
 
@@ -322,17 +342,16 @@ function renderDashboard() {
 /* =========================================================
    ENTRAÎNEMENT — séances types (templates)
    ========================================================= */
+let activeExIndex = null; // exercice ouvert dans la séance active (sous-vue détail)
+
 function renderWorkout() {
-  const home = $("#workout-home"), active = $("#workout-active");
-  if (state.activeSession) {
-    home.classList.add("hidden");
-    active.classList.remove("hidden");
-    renderActiveSession();
-    return;
-  }
-  home.classList.remove("hidden");
-  active.classList.add("hidden");
-  stopChrono(false);
+  const home = $("#workout-home"), active = $("#workout-active"), exDetail = $("#workout-exercise");
+  const showEx = state.activeSession && activeExIndex !== null && state.activeSession.entries[activeExIndex];
+  home.classList.toggle("hidden", !!state.activeSession);
+  active.classList.toggle("hidden", !state.activeSession || !!showEx);
+  exDetail.classList.toggle("hidden", !showEx);
+  if (showEx) { renderExerciseDetail(); return; }
+  if (state.activeSession) { activeExIndex = null; renderActiveSession(); return; }
 
   renderCharacter();
 
@@ -358,14 +377,12 @@ function renderWorkout() {
   $("#session-history").innerHTML = history.length
     ? history.map((s) => {
         const nbSets = s.entries.reduce((n, e) => n + e.sets.length, 0);
-        const bw = state.settings.bodyweightKg;
         const vol = s.entries.reduce((v, e) => {
           const ex = getExercise(e.exId);
           if (ex?.unit === "min") return v;
-          const base = ex?.unit === "pdc" ? bw : 0;
           return v + e.sets.reduce((sv, set) => {
             const r = Number(set.r) || 0;
-            return sv + (r > 0 ? (base + (Number(set.w) || 0)) * r : 0);
+            return sv + (r > 0 ? loadOfSet(ex, set) * r : 0);
           }, 0);
         }, 0);
         return `
@@ -526,14 +543,34 @@ function openExercisePicker(onPick) {
     const items = allExercises().filter((e) =>
       (activeGroup === "Tous" || e.group === activeGroup) &&
       (!q || norm(e.name).includes(q)));
-    body.querySelector("#ex-list").innerHTML = items.length
+
+    // Exercices déjà réalisés, du plus récent au plus ancien
+    let recentsHtml = "";
+    if (!q && activeGroup === "Tous") {
+      const recentIds = [];
+      [...state.sessions].sort((x, y) => y.date.localeCompare(x.date)).forEach((sess) =>
+        sess.entries.forEach((e) => { if (!recentIds.includes(e.exId) && getExercise(e.exId)) recentIds.push(e.exId); }));
+      if (recentIds.length) {
+        recentsHtml = `<div class="field-name" style="font-size:12px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin:4px 0 2px">Récents</div>`
+          + recentIds.slice(0, 5).map((id) => {
+            const e = getExercise(id);
+            return `<div class="list-item tappable" data-pick="${e.id}">
+              <div class="li-main"><div class="li-title">${escapeHtml(e.name)}</div>
+              <div class="li-sub">${escapeHtml(e.group)}</div></div>
+              <span style="color:var(--text-faint)">›</span></div>`;
+          }).join("")
+          + `<div class="divider"></div>`;
+      }
+    }
+
+    body.querySelector("#ex-list").innerHTML = recentsHtml + (items.length
       ? items.map((e) => `
           <div class="list-item tappable" data-pick="${e.id}">
             <div class="li-main"><div class="li-title">${escapeHtml(e.name)}${e.custom ? ' <span class="badge accent">perso</span>' : ""}</div>
             <div class="li-sub">${escapeHtml(e.group)} · ${{ kg: "charge × reps", pdc: "poids de corps", min: "chronomètre" }[e.unit] || "charge × reps"}</div></div>
             <span style="color:var(--text-faint)">›</span>
           </div>`).join("")
-      : `<div class="empty-state">Aucun exercice trouvé.</div>`;
+      : `<div class="empty-state">Aucun exercice trouvé.</div>`);
     body.querySelectorAll("[data-pick]").forEach((el) =>
       el.addEventListener("click", () => { closeModal(); onPick(el.dataset.pick); }));
   }
@@ -573,10 +610,43 @@ function startSession(templateId) {
   state.activeSession = {
     id: uid(),
     date: todayKey(),
-    name: tpl ? tpl.name : "Séance libre",
-    entries: (tpl ? tpl.exerciseIds : []).map((exId) => ({ exId, sets: [{ w: "", r: "" }, { w: "", r: "" }, { w: "", r: "" }] })),
+    type: "muscu",
+    name: tpl ? tpl.name : "Musculation",
+    entries: (tpl ? tpl.exerciseIds : []).map((exId) => ({ exId, sets: [] })),
   };
+  activeExIndex = null;
   save(); renderWorkout();
+}
+
+// Choix du sport au démarrage d'une séance libre
+$("#btn-start-session").addEventListener("click", () => {
+  const body = openModal("Nouvelle séance", `
+    <div class="section-note" style="margin-bottom:12px">Choisissez votre sport :</div>
+    <button class="btn full" id="sport-muscu" style="margin-bottom:10px;font-size:16px;padding:15px">🏋️ &nbsp;Musculation</button>
+    <button class="btn full" style="margin-bottom:10px;font-size:16px;padding:15px;opacity:0.45">🏃 &nbsp;Course à pied <span class="badge accent" style="margin-left:6px">bientôt</span></button>
+    <button class="btn full" style="font-size:16px;padding:15px;opacity:0.45">🏊 &nbsp;Natation <span class="badge accent" style="margin-left:6px">bientôt</span></button>
+  `);
+  body.querySelector("#sport-muscu").addEventListener("click", () => { closeModal(); startSession(null); });
+});
+
+// Libellé d'une série ("10 reps × 10 kg", "10 reps × PDC", "1.5 min")
+function serieLabel(ex, set) {
+  if (ex?.unit === "min") return `<span class="sr-val">${Number(set.r) || 0} <span class="x">min</span></span>`;
+  const charge = chargeLabel(ex, set);
+  const hl = charge.startsWith("PDC");
+  return `<span class="sr-val">${Number(set.r) || 0} <span class="x">reps ×</span> <span class="${hl ? "hl" : ""}">${charge}</span></span>`;
+}
+
+// Totaux d'un groupe de séries (pour les cartes de date, style Liftoff :
+// le PDC ne compte pas dans le total kg, seule la charge externe est sommée)
+function entryTotals(ex, sets) {
+  if (ex?.unit === "min") {
+    const min = sets.reduce((a, s2) => a + (Number(s2.r) || 0), 0);
+    return { a: { v: sets.length, l: "séries" }, b: { v: round1(min), l: "min" } };
+  }
+  const reps = sets.reduce((a, s2) => a + (Number(s2.r) || 0), 0);
+  const kg = sets.reduce((a, s2) => a + (Number(s2.w) || 0) * (Number(s2.r) || 0), 0);
+  return { a: { v: reps, l: "reps" }, b: { v: Math.round(kg), l: "kg" } };
 }
 
 function renderActiveSession() {
@@ -584,107 +654,186 @@ function renderActiveSession() {
   $("#active-session-name").textContent = s.name;
   $("#active-session-sub").textContent = fmtDateLong(s.date);
 
-  stopChrono(false);
-  $("#active-session-exercises").innerHTML = s.entries.map((entry, ei) => {
-    const ex = getExercise(entry.exId);
-    const best = bestForExercise(entry.exId);
-    const unit = ex?.unit || "kg";
-    let bestTxt = "Premier passage 💪";
-    if (best) {
-      if (unit === "min") bestTxt = `Record : ${best.min} min`;
-      else if (unit === "pdc") bestTxt = `Record : ${best.r} reps${best.lest ? ` (+${best.lest} kg)` : ""}`;
-      else bestTxt = `Record : ${best.w} kg × ${best.r} (1RM ≈ ${Math.round(best.e1rm)} kg)`;
-    }
-    const headers = { kg: ["Poids (kg)", "Reps"], pdc: ["Lest (kg)", "Reps"], min: ["Durée (min)", "Chrono"] }[unit];
-    return `
-    <div class="card session-exercise">
-      <div class="ex-head">
-        <div>
-          <div class="ex-name">${escapeHtml(ex?.name || "?")}</div>
-          <div class="ex-best">${bestTxt}</div>
-        </div>
-        <button class="btn ghost small danger" data-rm-ex="${ei}">✕</button>
-      </div>
-      <div class="set-cols-header"><span>#</span><span>${headers[0]}</span><span>${headers[1]}</span><span></span></div>
-      ${entry.sets.map((set, si) => {
-        const cells = unit === "min"
-          ? `<input type="number" inputmode="decimal" step="0.1" placeholder="min" value="${set.r}" data-set="${ei}:${si}:r">
-             <button class="chrono-btn" data-chrono="${ei}:${si}">⏱</button>`
-          : `<input type="number" inputmode="decimal" step="0.5" placeholder="${unit === "pdc" ? "lest" : "kg"}" value="${set.w}" data-set="${ei}:${si}:w">
-             <input type="number" inputmode="numeric" placeholder="reps" value="${set.r}" data-set="${ei}:${si}:r">`;
+  $("#active-session-exercises").innerHTML = s.entries.length
+    ? s.entries.map((entry, ei) => {
+        const ex = getExercise(entry.exId);
+        const last = entry.sets[entry.sets.length - 1];
         return `
-        <div class="set-row">
-          <span class="set-num">${si + 1}</span>
-          ${cells}
-          <button class="set-del" data-rm-set="${ei}:${si}">✕</button>
+        <div class="list-item">
+          <div class="li-main tappable" data-open-ex="${ei}">
+            <div class="li-title">${escapeHtml(ex?.name || "?")}</div>
+            <div class="li-sub">${entry.sets.length} série${entry.sets.length > 1 ? "s" : ""}${last ? ` — dernière : ${Number(last.r) || 0}${ex?.unit === "min" ? " min" : ` reps × ${chargeLabel(ex, last)}`}` : " — touchez pour saisir vos séries"}</div>
+          </div>
+          <button class="btn ghost small danger" data-rm-ex="${ei}">✕</button>
         </div>`;
-      }).join("")}
-      <button class="btn small full" data-add-set="${ei}">+ Série</button>
-    </div>`;
-  }).join("") || `<div class="empty-state"><div class="big">🏋️</div>Ajoutez un premier exercice pour démarrer.</div>`;
+      }).join("")
+    : `<div class="empty-state"><div class="big">🏋️</div>Ajoutez un premier exercice pour démarrer.</div>`;
 
-  // Bindings (mise à jour de l'état sans re-render pour garder le focus)
   const root = $("#active-session-exercises");
-  root.querySelectorAll("[data-set]").forEach((input) =>
-    input.addEventListener("input", () => {
-      const [ei, si, field] = input.dataset.set.split(":");
-      s.entries[ei].sets[si][field] = input.value;
-      save();
-    }));
-  root.querySelectorAll("[data-add-set]").forEach((b) =>
-    b.addEventListener("click", () => { s.entries[b.dataset.addSet].sets.push({ w: "", r: "" }); save(); renderActiveSession(); }));
-  root.querySelectorAll("[data-rm-set]").forEach((b) =>
+  root.querySelectorAll("[data-open-ex]").forEach((el) =>
+    el.addEventListener("click", () => { activeExIndex = Number(el.dataset.openEx); renderWorkout(); }));
+  root.querySelectorAll("[data-rm-ex]").forEach((b) =>
     b.addEventListener("click", () => {
-      const [ei, si] = b.dataset.rmSet.split(":");
-      s.entries[ei].sets.splice(Number(si), 1);
+      if (s.entries[b.dataset.rmEx].sets.length && !confirm("Supprimer cet exercice et ses séries ?")) return;
+      s.entries.splice(Number(b.dataset.rmEx), 1);
       save(); renderActiveSession();
     }));
-  root.querySelectorAll("[data-rm-ex]").forEach((b) =>
-    b.addEventListener("click", () => { s.entries.splice(Number(b.dataset.rmEx), 1); save(); renderActiveSession(); }));
-  root.querySelectorAll("[data-chrono]").forEach((btn) =>
-    btn.addEventListener("click", () => toggleChrono(btn)));
 }
 
-/* ---------- Chronomètre de série ---------- */
-let chrono = null;
+/* ---------- Détail d'un exercice : séries du jour + historique ---------- */
+function renderExerciseDetail() {
+  const s = state.activeSession;
+  const entry = s.entries[activeExIndex];
+  const ex = getExercise(entry.exId);
+  $("#ex-detail-name").textContent = ex?.name || "?";
+  $("#ex-detail-sub").textContent = `${ex?.group || ""} · ${{ kg: "charge × reps", pdc: "poids de corps", min: "chronomètre" }[ex?.unit] || ""}`;
 
-function toggleChrono(btn) {
-  const key = btn.dataset.chrono;
-  if (chrono && chrono.key === key) { stopChrono(true); return; }
-  stopChrono(true); // un seul chrono à la fois : l'ancien enregistre sa durée
-  chrono = {
-    key, btn, start: Date.now(),
-    timer: setInterval(() => {
-      const sec = Math.floor((Date.now() - chrono.start) / 1000);
-      btn.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
-    }, 500),
+  const dateCard = (dateKey, sets, current) => {
+    const t = entryTotals(ex, sets);
+    const [y, m, d] = dateKey.split("-");
+    return `
+    <div class="date-card ${current ? "" : "past"}">
+      <div class="dc-date">${d}/${m}<small>${y}</small></div>
+      <div class="dc-label">Total</div>
+      <div class="dc-stat"><div class="v">${t.a.v}</div><div class="l">${t.a.l}</div></div>
+      <div class="dc-stat"><div class="v">${t.b.v}</div><div class="l">${t.b.l}</div></div>
+      ${current ? '<div class="dc-label" style="margin-left:auto">en cours</div>' : ""}
+    </div>`;
   };
-  btn.classList.add("running");
-  btn.textContent = "0:00";
+
+  // Séance en cours (séries supprimables)
+  let html = dateCard(s.date, entry.sets, true);
+  html += entry.sets.length
+    ? entry.sets.map((set, si) => `
+        <div class="serie-row">
+          <span class="sr-num">Série ${si + 1}</span>
+          ${serieLabel(ex, set)}
+          <button class="sr-del" data-del-serie="${si}">✕</button>
+        </div>`).join("")
+    : `<div class="empty-state" style="padding:14px">Aucune série — appuyez sur « + Ajouter une série ».</div>`;
+
+  // Historique : séances passées contenant cet exercice
+  const past = [...state.sessions]
+    .filter((sess) => sess.entries.some((e) => e.exId === entry.exId))
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 10);
+  for (const sess of past) {
+    const pastSets = sess.entries.filter((e) => e.exId === entry.exId).flatMap((e) => e.sets);
+    html += dateCard(sess.date, pastSets, false);
+    html += pastSets.map((set, si) => `
+      <div class="serie-row">
+        <span class="sr-num">Série ${si + 1}</span>
+        ${serieLabel(ex, set)}
+      </div>`).join("");
+  }
+
+  $("#ex-detail-cards").innerHTML = html;
+  $("#ex-detail-cards").querySelectorAll("[data-del-serie]").forEach((b) =>
+    b.addEventListener("click", () => {
+      entry.sets.splice(Number(b.dataset.delSerie), 1);
+      save(); renderExerciseDetail();
+    }));
 }
 
-function stopChrono(writeValue) {
-  if (!chrono) return;
-  clearInterval(chrono.timer);
-  if (writeValue) {
-    const mins = Math.round(((Date.now() - chrono.start) / 60000) * 100) / 100;
-    const input = document.querySelector(`[data-set="${chrono.key}:r"]`);
-    if (input) { input.value = mins; input.dispatchEvent(new Event("input")); }
+$("#btn-ex-back").addEventListener("click", () => { activeExIndex = null; renderWorkout(); });
+$("#btn-add-serie").addEventListener("click", () => {
+  const entry = state.activeSession?.entries[activeExIndex];
+  if (entry) openSetKeypad(entry, getExercise(entry.exId));
+});
+
+/* ---------- Pavé numérique de saisie de série (style Liftoff) ---------- */
+function openSetKeypad(entry, ex) {
+  const unit = ex?.unit || "kg";
+  const isMin = unit === "min";
+  const padKeys = (prefix, extra) => {
+    let keys = "";
+    for (let n = 1; n <= 9; n++) keys += `<button class="pad-key" data-key="${prefix}:${n}">${n}</button>`;
+    keys += `<button class="pad-key" data-key="${prefix}:0">0</button>${extra}`;
+    return keys;
+  };
+
+  const body = openModal("Séries", isMin ? `
+    <div class="pad-section-head"><span class="pad-label">Durée :</span><span class="pad-value" id="pad-a"></span></div>
+    <div class="pad-grid">${padKeys("a", `<button class="pad-key" data-key="a:.">,</button><button class="pad-key" data-key="a:clear">Effacer</button>`)}</div>
+    <button class="btn full" id="pad-chrono" style="margin:12px 0 10px">⏱ Lancer le chrono</button>
+    <button class="btn primary full" id="pad-validate">Valider la série</button>
+  ` : `
+    <div class="pad-section-head"><span class="pad-label">Nombre de répétitions :</span><span class="pad-value" id="pad-a"></span></div>
+    <div class="pad-grid">${padKeys("a", `<button class="pad-key span-2" data-key="a:clear">Effacer</button>`)}</div>
+    <div class="pad-section-head"><span class="pad-label">${unit === "pdc" ? "Lest :" : "Charge :"}</span><span class="pad-value" id="pad-b"></span></div>
+    <div class="pad-grid">${padKeys("b", `<button class="pad-key" id="pad-pdc" data-key="b:pdc">PDC</button><button class="pad-key" data-key="b:clear">Effacer</button>`)}</div>
+    <button class="btn primary full" id="pad-validate" style="margin-top:16px">Valider la série</button>
+  `);
+
+  let a = "", b = "", pdcFlag = unit === "pdc";
+  let padChrono = null;
+
+  function refresh() {
+    if (isMin) {
+      body.querySelector("#pad-a").innerHTML = `${a || "0"} <span class="unit">min</span>`;
+      return;
+    }
+    body.querySelector("#pad-a").innerHTML = `${a || "0"} <span class="unit">reps</span>`;
+    const bEl = body.querySelector("#pad-b");
+    if (unit === "pdc") bEl.innerHTML = b ? `PDC <span class="unit">+</span> ${b} <span class="unit">kg</span>` : `<span style="color:var(--accent)">PDC</span>`;
+    else if (pdcFlag) bEl.innerHTML = `<span style="color:var(--accent)">PDC</span>`;
+    else bEl.innerHTML = `${b || "0"} <span class="unit">kg</span>`;
+    body.querySelector("#pad-pdc")?.classList.toggle("active", pdcFlag && !b);
   }
-  chrono.btn.classList.remove("running");
-  chrono.btn.textContent = "⏱";
-  chrono = null;
+
+  body.querySelectorAll("[data-key]").forEach((k) =>
+    k.addEventListener("click", () => {
+      const [target, val] = k.dataset.key.split(":");
+      if (val === "clear") { if (target === "a") a = ""; else { b = ""; pdcFlag = unit === "pdc"; } }
+      else if (val === "pdc") { pdcFlag = true; b = ""; }
+      else if (val === ".") { if (!a.includes(".")) a = (a || "0") + "."; }
+      else if (target === "a") { if (a.replace(".", "").length < 4) a += val; }
+      else { if (b.length < 4) b += val; if (unit !== "pdc") pdcFlag = false; }
+      refresh();
+    }));
+
+  body.querySelector("#pad-chrono")?.addEventListener("click", (e) => {
+    const btn = e.currentTarget;
+    if (padChrono) {
+      clearInterval(padChrono.timer);
+      a = String(Math.round(((Date.now() - padChrono.start) / 60000) * 100) / 100);
+      padChrono = null;
+      btn.textContent = "⏱ Lancer le chrono";
+      refresh();
+      return;
+    }
+    padChrono = { start: Date.now(), timer: setInterval(() => {
+      if (!document.contains(btn)) { clearInterval(padChrono.timer); padChrono = null; return; }
+      const sec = Math.floor((Date.now() - padChrono.start) / 1000);
+      btn.textContent = `⏹ Arrêter — ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+    }, 400) };
+    btn.textContent = "⏹ Arrêter — 0:00";
+  });
+
+  body.querySelector("#pad-validate").addEventListener("click", () => {
+    const r = Number(a);
+    if (!(r > 0)) { alert(isMin ? "Indiquez une durée (ou utilisez le chrono)." : "Indiquez un nombre de répétitions."); return; }
+    if (padChrono) { clearInterval(padChrono.timer); padChrono = null; }
+    const set = { w: Number(b) || 0, r };
+    if (!isMin && unit !== "pdc" && pdcFlag) set.pdc = true;
+    entry.sets.push(set);
+    save(); closeModal(); renderExerciseDetail();
+  });
+
+  refresh();
 }
 
 $("#btn-session-add-exercise").addEventListener("click", () =>
   openExercisePicker((exId) => {
-    state.activeSession.entries.push({ exId, sets: [{ w: "", r: "" }, { w: "", r: "" }, { w: "", r: "" }] });
-    save(); renderActiveSession();
+    state.activeSession.entries.push({ exId, sets: [] });
+    activeExIndex = state.activeSession.entries.length - 1;
+    save(); renderWorkout(); // ouvre directement la fiche de l'exercice
   }));
 
 $("#btn-cancel-session").addEventListener("click", () => {
   if (!confirm("Abandonner cette séance ? Les données saisies seront perdues.")) return;
   state.activeSession = null;
+  activeExIndex = null;
   save(); renderWorkout();
 });
 
@@ -702,6 +851,7 @@ $("#btn-finish-session").addEventListener("click", () => {
 
   state.sessions.push({ id: s.id, date: s.date, name: s.name, entries: cleaned });
   state.activeSession = null;
+  activeExIndex = null;
   save();
 
   // Détection des nouveaux records
@@ -712,9 +862,9 @@ $("#btn-finish-session").addEventListener("click", () => {
     if (ex.unit === "min") {
       if (!prev || now.min > prev.min) prs.push(`${ex.name} : ${now.min} min`);
     } else if (!prev || now.e1rm > prev.e1rm) {
-      prs.push(ex.unit === "pdc"
-        ? `${ex.name} : ${now.r} reps${now.lest ? ` +${now.lest} kg` : ""}`
-        : `${ex.name} : ${now.w} kg × ${now.r}`);
+      if (ex.unit === "pdc") prs.push(`${ex.name} : ${now.r} reps${now.lest ? ` +${now.lest} kg` : ""}`);
+      else if (now.pdc) prs.push(`${ex.name} : PDC × ${now.r}`);
+      else prs.push(`${ex.name} : ${now.w} kg × ${now.r}`);
     }
   });
   if (prs.length) alert("🏆 Nouveau record personnel !\n\n" + prs.join("\n"));
