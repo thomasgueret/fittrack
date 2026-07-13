@@ -36,7 +36,9 @@ body {
 }
 
 /* ---------- Layout ---------- */
-#app { max-width: 560px; margin: 0 auto; padding: 16px 16px 24px; }
+/* padding haut = safe-area (encoche / barre d'état iPhone) + marge, sinon le
+   contenu passe sous la barre d'état en mode PWA plein écran (status-bar translucide) */
+#app { max-width: 560px; margin: 0 auto; padding: calc(16px + env(safe-area-inset-top)) 16px 24px; }
 
 .view { display: none; animation: fadeIn 0.2s ease; }
 .view.active { display: block; }

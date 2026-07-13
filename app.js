@@ -4,7 +4,7 @@ import { BODY_SVG } from "./body.js";
 /* =========================================================
    État & persistance
    ========================================================= */
-const APP_VERSION = "1.4.0";
+const APP_VERSION = "1.4.1";
 const STORAGE_KEY = "fittrack-state-v1";
 
 const DEFAULT_STATE = {
