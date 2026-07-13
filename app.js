@@ -4,7 +4,7 @@ import { BODY_SVG } from "./body.js";
 /* =========================================================
    État & persistance
    ========================================================= */
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.4.0";
 const STORAGE_KEY = "fittrack-state-v1";
 
 const DEFAULT_STATE = {
@@ -152,24 +152,47 @@ function bestForExercise(exId) {
 /* =========================================================
    Gamification — rangs et stats par groupe musculaire
    ========================================================= */
-const RANKS = [
-  { name: "Bronze", color: "#cd8a4b", min: 0 },
-  { name: "Argent", color: "#b8c0cc", min: 200 },
-  { name: "Or", color: "#ffd166", min: 500 },
-  { name: "Platine", color: "#6fe3d4", min: 1200 },
-  { name: "Diamant", color: "#4da3ff", min: 2500 },
-  { name: "Maître", color: "#a78bfa", min: 5000 },
-  { name: "Légende", color: "#ff5c39", min: 10000 },
+/* 24 grades : Fer I → Champion III. Les seuils (`min`, XP global) sont
+   calibrés pour un entraînement QUOTIDIEN (~220 XP/jour : ~15 séries à
+   10 XP + 2-3 groupes musculaires à 25 XP) :
+   Cuivre I ≈ 1 mois, Bronze I ≈ 2 mois, Argent I ≈ 3 mois, Or I ≈ 6 mois,
+   Diamant I ≈ 1 an, Platine I ≈ 2 ans, Champion I ≈ 3 ans. */
+const RANK_FAMILIES = [
+  { name: "Fer", color: "#9aa3ad" },
+  { name: "Cuivre", color: "#c96f4a" },
+  { name: "Bronze", color: "#cd8a4b" },
+  { name: "Argent", color: "#c8d0dc" },
+  { name: "Or", color: "#ffd166" },
+  { name: "Diamant", color: "#4da3ff" },
+  { name: "Platine", color: "#6fe3d4" },
+  { name: "Champion", color: "#ff5c39" },
 ];
+const RANK_THRESHOLDS = [
+  0, 800, 2000,             // Fer I, II, III
+  6500, 8500, 10500,        // Cuivre (I ≈ 1 mois → 6 600 XP)
+  13000, 15000, 17000,      // Bronze (I ≈ 2 mois → 13 200 XP)
+  19500, 26000, 32000,      // Argent (I ≈ 3 mois → 19 800 XP)
+  39000, 52000, 65000,      // Or (I ≈ 6 mois → 39 600 XP)
+  80000, 105000, 130000,    // Diamant (I ≈ 1 an → 80 300 XP)
+  160000, 185000, 210000,   // Platine (I ≈ 2 ans → 160 600 XP)
+  240000, 280000, 320000,   // Champion (I ≈ 3 ans → 240 900 XP)
+];
+const RANKS = RANK_FAMILIES.flatMap((f, i) =>
+  ["I", "II", "III"].map((t, j) => ({ name: `${f.name} ${t}`, color: f.color, min: RANK_THRESHOLDS[i * 3 + j] })));
+
+// Rang par groupe musculaire : seuils divisés par 6 (l'XP globale se
+// répartit sur plusieurs groupes ; ~6 réellement travaillés en moyenne).
+const GROUP_SCALE = 1 / 6;
 
 // XP d'un groupe : 10 par série + 25 par séance incluant le groupe.
-// scale > 1 pour le rang global (seuils multipliés).
 function rankFor(xp, scale = 1) {
   let idx = 0;
-  for (let i = 0; i < RANKS.length; i++) if (xp >= RANKS[i].min * scale) idx = i;
+  for (let i = 0; i < RANKS.length; i++) if (xp >= Math.round(RANKS[i].min * scale)) idx = i;
   const rank = RANKS[idx], next = RANKS[idx + 1];
-  const progress = next ? (xp - rank.min * scale) / (next.min * scale - rank.min * scale) : 1;
-  return { rank, next, progress: Math.min(1, progress), xp };
+  const curMin = Math.round(rank.min * scale);
+  const nextMin = next ? Math.round(next.min * scale) : null;
+  const progress = next ? (xp - curMin) / (nextMin - curMin) : 1;
+  return { rank, next, nextMin, progress: Math.min(1, progress), xp };
 }
 
 function computeGroupStats() {
@@ -410,9 +433,9 @@ let selectedGroup = null;
 function renderCharacter() {
   const stats = computeGroupStats();
 
-  // Rang global (seuils ×6)
+  // Rang global du personnage
   const totalXp = Object.values(stats).reduce((a, s) => a + s.xp, 0);
-  const global = rankFor(totalXp, 6);
+  const global = rankFor(totalXp);
   $("#global-rank-badge").innerHTML = rankBadge(global.rank, `${global.rank.name} · ${totalXp} XP`);
 
   // Silhouette colorée par intensité (30 derniers jours)
@@ -427,7 +450,7 @@ function renderCharacter() {
 
   // Liste des rangs par groupe
   $("#rank-list").innerHTML = EXERCISE_GROUPS.map((g) => {
-    const { rank } = rankFor(stats[g].xp);
+    const { rank } = rankFor(stats[g].xp, GROUP_SCALE);
     return `<div class="rank-item tappable" data-group-row="${g}">
       <span class="rg-name">${g}</span>${rankBadge(rank)}</div>`;
   }).join("");
@@ -449,7 +472,7 @@ function selectMuscle(group, stats, silent) {
     z.classList.toggle("selected", z.dataset.group === group));
 
   const st = stats[group];
-  const { rank, next, progress, xp } = rankFor(st.xp);
+  const { rank, next, nextMin, progress, xp } = rankFor(st.xp, GROUP_SCALE);
   panel.innerHTML = `
     <div class="mp-head"><span class="mp-name">${group}</span>${rankBadge(rank, `${rank.name}`)}</div>
     <div class="mp-rows">
@@ -458,7 +481,7 @@ function selectMuscle(group, stats, silent) {
       <span>Dernier : <strong>${st.last ? fmtDateShort(st.last) : "jamais"}</strong></span>
     </div>
     <div class="progress-track"><div class="progress-fill" style="width:${Math.round(progress * 100)}%;background:${rank.color}"></div></div>
-    <div class="mp-next">${next ? `${xp} XP — encore ${next.min - xp} XP avant le rang ${next.name}` : `${xp} XP — rang maximum atteint 👑`}</div>`;
+    <div class="mp-next">${next ? `${xp} XP — encore ${nextMin - xp} XP avant le rang ${next.name}` : `${xp} XP — rang maximum atteint 👑`}</div>`;
 }
 
 $("#btn-new-template").addEventListener("click", () => openTemplateEditor(null));
@@ -741,6 +764,16 @@ $("#btn-add-serie").addEventListener("click", () => {
   if (entry) openSetKeypad(entry, getExercise(entry.exId));
 });
 
+// Dernière série réalisée pour un exercice (dans l'historique)
+function lastSetForExercise(exId) {
+  const sess = [...state.sessions]
+    .filter((s) => s.entries.some((e) => e.exId === exId))
+    .sort((a, b) => b.date.localeCompare(a.date))[0];
+  if (!sess) return null;
+  const sets = sess.entries.filter((e) => e.exId === exId).flatMap((e) => e.sets);
+  return sets[sets.length - 1] || null;
+}
+
 /* ---------- Pavé numérique de saisie de série (style Liftoff) ---------- */
 function openSetKeypad(entry, ex) {
   const unit = ex?.unit || "kg";
@@ -765,7 +798,17 @@ function openSetKeypad(entry, ex) {
     <button class="btn primary full" id="pad-validate" style="margin-top:16px">Valider la série</button>
   `);
 
+  // Pré-remplissage avec la série précédente (séance en cours, sinon historique).
+  // La première touche remplace la valeur pré-remplie au lieu de s'y ajouter.
+  const prev = entry.sets[entry.sets.length - 1] || lastSetForExercise(entry.exId);
   let a = "", b = "", pdcFlag = unit === "pdc";
+  let aFresh = false, bFresh = false;
+  if (prev) {
+    a = String(Number(prev.r) || "");
+    b = Number(prev.w) > 0 ? String(Number(prev.w)) : "";
+    if (unit === "kg") pdcFlag = !!prev.pdc;
+    aFresh = !!a; bFresh = true;
+  }
   let padChrono = null;
 
   function refresh() {
@@ -784,11 +827,17 @@ function openSetKeypad(entry, ex) {
   body.querySelectorAll("[data-key]").forEach((k) =>
     k.addEventListener("click", () => {
       const [target, val] = k.dataset.key.split(":");
-      if (val === "clear") { if (target === "a") a = ""; else { b = ""; pdcFlag = unit === "pdc"; } }
-      else if (val === "pdc") { pdcFlag = true; b = ""; }
-      else if (val === ".") { if (!a.includes(".")) a = (a || "0") + "."; }
-      else if (target === "a") { if (a.replace(".", "").length < 4) a += val; }
-      else { if (b.length < 4) b += val; if (unit !== "pdc") pdcFlag = false; }
+      if (val === "clear") { if (target === "a") { a = ""; aFresh = false; } else { b = ""; bFresh = false; pdcFlag = unit === "pdc"; } }
+      else if (val === "pdc") { pdcFlag = true; b = ""; bFresh = false; }
+      else if (val === ".") { if (aFresh) { a = "0."; aFresh = false; } else if (!a.includes(".")) a = (a || "0") + "."; }
+      else if (target === "a") {
+        if (aFresh) { a = val; aFresh = false; }
+        else if (a.replace(".", "").length < 4) a += val;
+      } else {
+        if (bFresh) { b = val; bFresh = false; }
+        else if (b.length < 4) b += val;
+        if (unit !== "pdc") pdcFlag = false;
+      }
       refresh();
     }));
 
